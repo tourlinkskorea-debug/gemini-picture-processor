@@ -1,0 +1,82 @@
+name: Sync Fork with Upstream
+
+on:
+  schedule:
+    # Run every day at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Allow manual triggering
+  
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+        
+    - name: Configure Git
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+    - name: Add upstream remote
+      run: |
+        git remote add upstream https://github.com/rorypku/gemini-picture-processor.git
+        git fetch upstream
+        
+    - name: Check for updates
+      id: check
+      run: |
+        # Get the latest commit from upstream main branch
+        UPSTREAM_SHA=$(git rev-parse upstream/main)
+        CURRENT_SHA=$(git rev-parse HEAD)
+        
+        echo "upstream_sha=$UPSTREAM_SHA" >> $GITHUB_OUTPUT
+        echo "current_sha=$CURRENT_SHA" >> $GITHUB_OUTPUT
+        
+        if [ "$UPSTREAM_SHA" != "$CURRENT_SHA" ]; then
+          echo "updates_available=true" >> $GITHUB_OUTPUT
+          echo "📥 Updates available from upstream"
+        else
+          echo "updates_available=false" >> $GITHUB_OUTPUT
+          echo "✅ Fork is up to date"
+        fi
+        
+    - name: Sync with upstream
+      if: steps.check.outputs.updates_available == 'true'
+      run: |
+        echo "🔄 Syncing with upstream..."
+        
+        # Determine the default branch
+        DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@' || echo "main")
+        echo "📍 Default branch: $DEFAULT_BRANCH"
+        
+        # Checkout default branch
+        git checkout $DEFAULT_BRANCH
+        
+        # Merge upstream changes
+        git merge upstream/$DEFAULT_BRANCH --no-edit
+        
+        # Push changes
+        git push origin $DEFAULT_BRANCH
+        
+        echo "✅ Successfully synced with upstream!"
+        
+    - name: Create summary
+      run: |
+        if [ "${{ steps.check.outputs.updates_available }}" == "true" ]; then
+          echo "## 🔄 Fork Sync Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Successfully synced with upstream repository" >> $GITHUB_STEP_SUMMARY
+          echo "- 📥 Upstream SHA: \`${{ steps.check.outputs.upstream_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 📤 Previous SHA: \`${{ steps.check.outputs.current_sha }}\`" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "## ✅ Fork Up to Date" >> $GITHUB_STEP_SUMMARY
+          echo "- No updates available from upstream repository" >> $GITHUB_STEP_SUMMARY
+          echo "- Current SHA: \`${{ steps.check.outputs.current_sha }}\`" >> $GITHUB_STEP_SUMMARY
+        fi
